@@ -51,7 +51,7 @@ async function processUser(u, today, min) {
     if (!c || !c.on) { notes.push(k + ":kapalı"); continue; }
     if (c.text === false) { notes.push(k + ":yazılı bildirim kapalı"); continue; }
     const s = st[k] || {};
-    const ms = Math.max(10, Number(c.every) || 60) * (c.unit === "h" ? 60 : 1) * 60e3 - 2 * 60e3; // 2 dk tolerans
+    const ms = Math.max(2, Number(c.every) || 60) * (c.unit === "h" ? 60 : 1) * 60e3 - 30e3; // 30 sn tolerans
     let mark = null;
     if (c.mode === "daily") {
       for (const t of c.times || []) {
