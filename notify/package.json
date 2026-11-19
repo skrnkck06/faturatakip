@@ -1,0 +1,5 @@
+{
+  "name": "fatura-bildirim",
+  "private": true,
+  "dependencies": { "firebase-admin": "^12.6.0" }
+}
