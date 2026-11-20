@@ -46,8 +46,8 @@ async function processUser(u, today, min, dow) {
     notes.push("test gönderildi:" + n);
   }
 
-  let bills = null;
-  for (const k of ["late", "soon"]) {
+  let bills = null, allBills = null, infos = null;
+  for (const k of ["late", "soon", "query"]) {
     const c = cfg[k];
     if (!c || !c.on) { notes.push(k + ":kapalı"); continue; }
     if (c.text === false) { notes.push(k + ":yazılı bildirim kapalı"); continue; }
@@ -69,16 +69,32 @@ async function processUser(u, today, min, dow) {
     } else if (!s.t || Date.now() - s.t >= ms) mark = "i";
     if (!mark) { notes.push(k + ":zamanı gelmedi"); continue; }
 
-    if (!bills) bills = (await u.collection("bills").get()).docs.map(d => d.data()).filter(b => !b.paid && b.due);
-    const items = bills.map(b => ({ ...b, n: dayNum(b.due) - dayNum(today) }))
-      .filter(b => k === "late" ? b.n < 0 : b.n >= 0 && b.n <= (Number(c.days) || 3))
-      .sort((a, b) => a.due.localeCompare(b.due));
-    if (!items.length) { notes.push(k + ":bildirilecek fatura yok"); continue; }
-
-    const total = items.reduce((a, b) => a + Number(b.amount || 0), 0);
-    const lines = items.slice(0, 4).map(b => `${b.shop} · ${b.type} · ${money(b.amount)} · ${label(b.n)}`);
-    if (items.length > 4) lines.push(`+ ${items.length - 4} fatura daha`);
-    const title = (k === "late" ? "Gecikmiş ödeme: " : "Yaklaşan ödeme: ") + items.length + " fatura · " + money(total);
+    let items, title, lines;
+    if (k === "query") {
+      // Son ödeme tarihi girilmiş ama o tarih için borç kaydı olmayan faturalar
+      if (!allBills) allBills = (await u.collection("bills").get()).docs.map(d => d.data());
+      if (!infos) infos = (await u.collection("info").get()).docs.map(d => ({ id: d.id, ...d.data() }));
+      const lim = Number(c.days) || 3;
+      items = infos
+        .filter(i => i.due && i.noDebtFor !== i.due && !allBills.some(b => b.due === i.due && (b.infoId === i.id || (!b.infoId && b.shop === i.shop && b.type === i.type && b.provider === i.provider))))
+        .map(i => ({ ...i, n: dayNum(i.due) - dayNum(today) }))
+        .filter(i => i.n >= 0 && i.n <= lim)
+        .sort((a, b) => a.due.localeCompare(b.due));
+      if (!items.length) { notes.push(k + ":borcu sorgulanacak fatura yok"); continue; }
+      lines = items.slice(0, 4).map(i => `${i.shop} · ${i.type} · ${label(i.n)}`);
+      if (items.length > 4) lines.push(`+ ${items.length - 4} fatura daha`);
+      title = "Borç sorgula: " + items.length + " fatura";
+    } else {
+      if (!bills) bills = (await u.collection("bills").get()).docs.map(d => d.data()).filter(b => !b.paid && b.due);
+      items = bills.map(b => ({ ...b, n: dayNum(b.due) - dayNum(today) }))
+        .filter(b => k === "late" ? b.n < 0 : b.n >= 0 && b.n <= (Number(c.days) || 3))
+        .sort((a, b) => a.due.localeCompare(b.due));
+      if (!items.length) { notes.push(k + ":bildirilecek fatura yok"); continue; }
+      const total = items.reduce((a, b) => a + Number(b.amount || 0), 0);
+      lines = items.slice(0, 4).map(b => `${b.shop} · ${b.type} · ${money(b.amount)} · ${label(b.n)}`);
+      if (items.length > 4) lines.push(`+ ${items.length - 4} fatura daha`);
+      title = (k === "late" ? "Gecikmiş ödeme: " : "Yaklaşan ödeme: ") + items.length + " fatura · " + money(total);
+    }
     const n = await send({ title, body: lines.join("\n"), tag: "fatura-" + k });
 
     const ns = mark === "i" ? { t: Date.now() }
