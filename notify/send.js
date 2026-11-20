@@ -10,12 +10,13 @@ const tm = t => { const [h, m] = String(t || "0:0").split(":").map(Number); retu
 function nowTR() {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
     .formatToParts(new Date()).map(x => [x.type, x.value]));
-  return { today: `${p.year}-${p.month}-${p.day}`, min: Number(p.hour) * 60 + Number(p.minute) };
+  const today = `${p.year}-${p.month}-${p.day}`;
+  return { today, min: Number(p.hour) * 60 + Number(p.minute), dow: new Date(today + "T00:00:00Z").getUTCDay() }; // 0=Pazar … 6=Cumartesi
 }
 const dayNum = s => { const [y, m, d] = s.split("-").map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
 const label = n => n < 0 ? Math.abs(n) + " gün gecikti" : n === 0 ? "Bugün son gün" : n + " gün kaldı";
 
-async function processUser(u, today, min) {
+async function processUser(u, today, min, dow) {
   const notes = [];
   const cfg = (await u.collection("settings").doc("notif").get()).data();
   const devs = await u.collection("devices").get();
@@ -50,8 +51,10 @@ async function processUser(u, today, min) {
     const c = cfg[k];
     if (!c || !c.on) { notes.push(k + ":kapalı"); continue; }
     if (c.text === false) { notes.push(k + ":yazılı bildirim kapalı"); continue; }
+    // Önce güne bak: bugün seçili günlerden değilse bildirim gönderme (wd yoksa eski ayar: her gün)
+    if (Array.isArray(c.wd) && !c.wd.includes(dow)) { notes.push(k + ":bugün seçili gün değil"); continue; }
     const s = st[k] || {};
-    const ms = Math.max(2, Number(c.every) || 60) * (c.unit === "h" ? 60 : 1) * 60e3 - 30e3; // 30 sn tolerans
+    const ms = Math.max(2, Number(c.every) || 60) * (c.unit === "h" ? 60 : 1) * 60e3 - 2 * 60e3; // 2 dk tolerans
     let mark = null;
     if (c.mode === "daily") {
       for (const t of c.times || []) {
@@ -87,13 +90,13 @@ async function processUser(u, today, min) {
 }
 
 (async () => {
-  const { today, min } = nowTR();
+  const { today, min, dow } = nowTR();
   console.log("Türkiye saati:", today, Math.floor(min / 60) + ":" + String(min % 60).padStart(2, "0"));
   const users = await db.collection("users").listDocuments();
   console.log("Kullanıcı sayısı:", users.length);
   for (const u of users) {
     let note;
-    try { note = await processUser(u, today, min); } catch (e) { note = "HATA: " + (e.message || e); }
+    try { note = await processUser(u, today, min, dow); } catch (e) { note = "HATA: " + (e.message || e); }
     console.log(u.id, "→", note);
     try { await u.collection("settings").doc("serverLog").set({ at: new Date().toISOString(), note }); } catch (e) { console.error("log yazılamadı", e.message); }
   }
